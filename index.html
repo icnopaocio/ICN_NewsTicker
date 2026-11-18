@@ -1,0 +1,179 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Crete+Round:ital@1&family=Poppins:wght@400;600;700&family=Source+Sans+3:wght@600&family=IBM+Plex+Serif:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;1,100;1,200;1,300;1,400;1,500;1,600;1,700&family=Jost:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+  <style>
+
+    html {
+      font-size: 100%;
+      font-family: "Jost", sans-serif;
+    }
+
+    body {
+      display: flex;
+      width: 100vw;
+      height: calc(100vw * 7 / 64);
+      overflow: hidden;
+      background: black;
+      margin: 0;
+    }
+
+    .news-ticker {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: flex-start;
+      width: 100%;
+      height: 100%;
+      background-color: #E7E7E7;
+      border: .5px solid grey;
+      font-family: 'Manrope', sans-serif;
+      overflow: hidden;
+      opacity: 0;
+    }
+
+    #logo {
+      flex-shrink: 0;
+      max-height: 100%;
+      max-width: 11.7cqw;
+      margin-left: 1.35cqw;
+    }
+
+    #pic {
+      height: 100%;
+      width: 100%;
+    }
+
+    .column {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 0 3rem 0 2rem;
+      overflow: hidden;
+    }
+
+    #headline {
+      color: black;
+      font-weight: 800;
+      font-size: 1.35cqw;
+      margin-bottom: 0.4cqw;
+    }
+
+    #description {
+      color: black;
+      font-size: 1.1cqw;
+    }
+
+  </style>
+
+</head>
+  <body>
+    <div class="news-ticker">
+      <div id="logo"></div>
+      <div class="column">
+        <h2 id='headline'></h2>
+        <div id='description'></div>
+      </div>
+    </div>
+    <script>
+	const DISPLAY_MS = 15000;
+        const FADE_MS    = 2000;
+
+function stripHtml(html) {
+    const div = document.createElement('div');
+    div.innerHTML = html;
+    return div.textContent || div.innerText || '';
+}
+
+// Netlify Function proxy — same domain, no CORS issues
+const CORS_PROXY = '/.netlify/functions/rss-proxy?url=';
+
+function parseRssXml(xmlText) {
+    const xml = new DOMParser().parseFromString(xmlText, 'text/xml');
+    return [...xml.querySelectorAll('item')].slice(0, 20).map(item => ({
+        headline:    stripHtml(item.querySelector('title')?.textContent || ''),
+        description: stripHtml(item.querySelector('description')?.textContent || '')
+    }));
+}
+
+async function fetchFeed(rssUrl) {
+    const res = await fetch(CORS_PROXY + encodeURIComponent(rssUrl));
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return parseRssXml(await res.text());
+}
+
+Promise.allSettled([
+    fetchFeed('https://feeds.foxnews.com/foxnews/latest'),
+    fetchFeed('https://rss.nytimes.com/services/xml/rss/nyt/US.xml')
+])
+.then(results => {
+    const foxArticles = results[0].status === 'fulfilled' ? results[0].value : [];
+    const nytArticles = results[1].status === 'fulfilled' ? results[1].value : [];
+
+    results.forEach((r, idx) => {
+        if (r.status === 'rejected')
+            console.warn(`Feed ${idx === 0 ? 'Fox' : 'NYT'} failed:`, r.reason);
+    });
+
+    // Build alternating feed list: Fox first, then NYT, repeat
+    const feeds = [
+        { articles: foxArticles, img: '<img src="foxLogo.png" id="pic" style="transform: scale(1.2)">' },
+        { articles: nytArticles, img: '<img src="NYT.png"     id="pic" style="transform: scale(1.5)">' }
+    ].filter(f => f.articles.length > 0);
+
+    if (feeds.length === 0) {
+        console.error('Both feeds failed — nothing to display.');
+        return;
+    }
+
+    const titleDiv = document.getElementById('headline');
+    const descDiv  = document.getElementById('description');
+    const logoDiv  = document.getElementById('logo');
+    const ticker   = document.querySelector('.news-ticker');
+
+    // Track how far through each feed's article list we are
+    const articleIndices = feeds.map(() => 0);
+    let feedIdx = 0;
+
+    function showStory() {
+        const slot    = feedIdx % feeds.length;
+        const feed    = feeds[slot];
+        const artIdx  = articleIndices[slot];
+        const story   = feed.articles[artIdx % feed.articles.length];
+
+        // Update content while invisible
+        logoDiv.innerHTML  = feed.img;
+        titleDiv.innerHTML = story.headline;
+        descDiv.innerHTML  = '<p>' + story.description + '</p>';
+
+        // Fade in over 1 second
+        ticker.style.transition = 'opacity 1s ease-in-out';
+        ticker.style.opacity    = '1';
+
+        // Advance counters for next call
+        articleIndices[slot]++;
+        feedIdx++;
+
+        // Fade out after 15 s
+        setTimeout(() => {
+            ticker.style.transition = `opacity ${FADE_MS}ms ease-in-out`;
+            ticker.style.opacity    = '0';
+        }, DISPLAY_MS);
+
+        // Show next story after fade completes
+        setTimeout(showStory, DISPLAY_MS + FADE_MS);
+    }
+
+    showStory();
+});
+
+    </script>
+  </body>
+</html>
